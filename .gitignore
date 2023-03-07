@@ -6,7 +6,7 @@ data
 
 # IDEs generated folders
 .spyproject
-venv/
+env/
 .idea/
 __MACOSX/
 **/.DS_Store
