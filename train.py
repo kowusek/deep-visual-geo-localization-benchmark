@@ -16,7 +16,6 @@ import test
 import parser
 import commons
 import datasets_ws
-#from model import network_small as network
 from model import network
 from model.sync_batchnorm import convert_model
 from model.functional import sare_ind, sare_joint
