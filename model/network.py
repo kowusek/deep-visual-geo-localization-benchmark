@@ -115,18 +115,19 @@ def get_backbone(args):
             backbone = torchvision.models.resnet50(weights='ResNet50_Weights.DEFAULT')
         elif args.backbone.startswith("resnet101"):
             backbone = torchvision.models.resnet101(weights='ResNet101_Weights.DEFAULT')
-        for name, child in backbone.named_children():
-            # Freeze layers before conv_3
-            if name == "layer3":
-                break
-            for params in child.parameters():
-                params.requires_grad = False
-        if args.backbone.endswith("conv4"):
-            logging.debug(f"Train only conv4_x of the resnet{args.backbone.split('conv')[0]} (remove conv5_x), freeze the previous ones")
-            layers = list(backbone.children())[:-3]
-        elif args.backbone.endswith("conv5"):
-            logging.debug(f"Train only conv4_x and conv5_x of the resnet{args.backbone.split('conv')[0]}, freeze the previous ones")
-            layers = list(backbone.children())[:-2]
+        # for name, child in backbone.named_children():
+        #     # Freeze layers before conv_3
+        #     if name == "layer3":
+        #         break
+        #     for params in child.parameters():
+        #         params.requires_grad = False
+        # if args.backbone.endswith("conv4"):
+        #     logging.debug(f"Train only conv4_x of the resnet{args.backbone.split('conv')[0]} (remove conv5_x), freeze the previous ones")
+        #     layers = list(backbone.children())[:-3]
+        # elif args.backbone.endswith("conv5"):
+        #     logging.debug(f"Train only conv4_x and conv5_x of the resnet{args.backbone.split('conv')[0]}, freeze the previous ones")
+        #     layers = list(backbone.children())[:-2]
+        layers = list(backbone.children())[:-1]
     elif args.backbone == "vgg16":
         if args.pretrain in ['places', 'gldv2']:
             backbone = get_pretrained_model(args)

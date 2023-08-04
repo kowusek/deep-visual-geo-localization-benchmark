@@ -120,7 +120,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
     # How many loops should an epoch last (default is 5000/1000=5)
     loops_num = math.ceil(args.queries_per_epoch / args.cache_refresh_rate)
     for loop_num in range(loops_num):
-        logging.debug(f"Cache: {loop_num} / {loops_num}")
+        logging.debug(f"Cache: {loop_num + 1} / {loops_num}")
         
         # Compute triplets to use in the triplet loss
         triplets_ds.is_inference = True
@@ -181,7 +181,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             epoch_losses = np.append(epoch_losses, batch_loss)
             del loss_triplet
         
-        logging.debug(f"Epoch[{epoch_num:02d}]({loop_num}/{loops_num}): " +
+        logging.debug(f"Epoch[{epoch_num:02d}]: " +
                       f"current batch triplet loss = {batch_loss:.4f}, " +
                       f"average epoch triplet loss = {epoch_losses.mean():.4f}")
         wandb.log({"loss": epoch_losses.mean()})
