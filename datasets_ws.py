@@ -13,11 +13,12 @@ import torchvision.transforms as T
 from torch.utils.data.dataset import Subset
 from sklearn.neighbors import NearestNeighbors
 from torch.utils.data.dataloader import DataLoader
+from matplotlib.pyplot import imshow
 
 
 base_transform = T.Compose([
     T.ToTensor(),
-    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    #T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
 
 
@@ -96,6 +97,9 @@ class BaseDataset(data.Dataset):
         self.soft_positives_per_query = knn.radius_neighbors(self.queries_utms,
                                                              radius=args.val_positive_dist_threshold,
                                                              return_distance=False)
+        # self.soft_positives_per_query = list(knn.kneighbors(self.queries_utms,
+        #                                     4,
+        #                                     return_distance=False))
         
         self.images_paths = list(self.database_paths) + list(self.queries_paths)
         
@@ -177,22 +181,46 @@ class TripletsDataset(BaseDataset):
         # Find hard_positives_per_query, which are within train_positives_dist_threshold (10 meters)
         knn = NearestNeighbors(n_jobs=-1)
         knn.fit(self.database_utms)
-        self.hard_positives_per_query = list(knn.radius_neighbors(self.queries_utms,
+        self.hard_positives_per_query = knn.radius_neighbors(self.queries_utms,
                                              radius=args.train_positives_dist_threshold,  # 10 meters
-                                             return_distance=False))
+                                             return_distance=False)
+        # self.hard_positives_per_query = list(knn.kneighbors(self.queries_utms,
+        #                                     1,
+        #                                     return_distance=False))
+        
         
         #### Some queries might have no positive, we should remove those queries.
         queries_without_any_hard_positive = np.where(np.array([len(p) for p in self.hard_positives_per_query], dtype=object) == 0)[0]
         if len(queries_without_any_hard_positive) != 0:
             logging.info(f"There are {len(queries_without_any_hard_positive)} queries without any positives " +
                          "within the training set. They won't be considered as they're useless for training.")
-        # Remove queries without positives
-        self.hard_positives_per_query = np.delete(self.hard_positives_per_query, queries_without_any_hard_positive)
-        self.queries_paths = np.delete(self.queries_paths, queries_without_any_hard_positive)
-        
-        # Recompute images_paths and queries_num because some queries might have been removed
-        self.images_paths = list(self.database_paths) + list(self.queries_paths)
-        self.queries_num = len(self.queries_paths)
+       
+            # Remove queries without positives
+            mask = np.ones(len(self.hard_positives_per_query), dtype=bool)
+            mask[queries_without_any_hard_positive] = False
+            self.hard_positives_per_query = self.hard_positives_per_query[mask]
+
+            # Remove queries without positives from soft positives
+            self.soft_positives_per_query = self.soft_positives_per_query[mask]
+
+            # Recompute images_paths and queries_num because some queries might have been removed
+            self.queries_paths = list(np.array(self.queries_paths)[mask])
+            self.images_paths = list(self.database_paths) + list(self.queries_paths)
+            self.queries_num = len(self.queries_paths)
+
+            # Recompute utms
+            self.queries_utms = self.queries_utms[mask]
+
+            #### Recompute positives
+
+            self.hard_positives_per_query = knn.radius_neighbors(self.queries_utms,
+                                             radius=args.train_positives_dist_threshold,
+                                             return_distance=False)
+
+            self.soft_positives_per_query = knn.radius_neighbors(self.queries_utms,
+                                                             radius=args.val_positive_dist_threshold,
+                                                             return_distance=False)
+            
         
         # msls_weighted refers to the mining presented in MSLS paper's supplementary.
         # Basically, images from uncommon domains are sampled more often. Works only with MSLS dataset.
@@ -218,10 +246,28 @@ class TripletsDataset(BaseDataset):
             # At inference time return the single image. This is used for caching or computing NetVLAD's clusters
             return super().__getitem__(index)
         query_index, best_positive_index, neg_indexes = torch.split(self.triplets_global_indexes[index], (1, 1, self.negs_num_per_query))
+        ###debug
+        # image_original = path_to_pil_img(self.queries_paths[query_index])
+        # imshow(image_original)
+        # image_original = path_to_pil_img(self.database_paths[best_positive_index])
+        # imshow(image_original)
+        # for image in neg_indexes:
+        #     image_original = path_to_pil_img(self.database_paths[image])
+        #     imshow(image_original)
+        ###
         query = self.query_transform(path_to_pil_img(self.queries_paths[query_index]))
         positive = self.resized_transform(path_to_pil_img(self.database_paths[best_positive_index]))
         negatives = [self.resized_transform(path_to_pil_img(self.database_paths[i])) for i in neg_indexes]
         images = torch.stack((query, positive, *negatives), 0)
+        ###debug
+        # image_after = images[0].permute(1, 2, 0).numpy()
+        # imshow(image_after)
+        # image_after = images[1].permute(1, 2, 0).numpy()
+        # imshow(image_after)
+        # image_after = images[2].permute(1, 2, 0).numpy()
+        # imshow(image_after)
+        ###
+
         triplets_local_indexes = torch.empty((0, 3), dtype=torch.int)
         for neg_num in range(len(neg_indexes)):
             triplets_local_indexes = torch.cat((triplets_local_indexes, torch.tensor([0, 1, 2 + neg_num]).reshape(1, 3)))

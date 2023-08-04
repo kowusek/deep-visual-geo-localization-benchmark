@@ -16,9 +16,12 @@ import test
 import parser
 import commons
 import datasets_ws
+#from model import network_small as network
 from model import network
 from model.sync_batchnorm import convert_model
 from model.functional import sare_ind, sare_joint
+
+import wandb
 
 torch.backends.cudnn.benchmark = True  # Provides a speedup
 #### Initial setup: parser, logging...
@@ -27,6 +30,8 @@ start_time = datetime.now()
 args.save_dir = join("logs", args.save_dir, start_time.strftime('%Y-%m-%d_%H-%M-%S'))
 commons.setup_logging(args.save_dir)
 commons.make_deterministic(args.seed)
+pil_logger = logging.getLogger('PIL')
+pil_logger.setLevel(logging.INFO)
 logging.info(f"Arguments: {args}")
 logging.info(f"The outputs are being saved in {args.save_dir}")
 logging.info(f"Using {torch.cuda.device_count()} GPUs and {multiprocessing.cpu_count()} CPUs")
@@ -102,6 +107,15 @@ if torch.cuda.device_count() >= 2:
     model = convert_model(model)
     model = model.cuda()
 
+run = wandb.init(
+    # Set the project where this run will be logged
+    project="my-awesome-project",
+    # Track hyperparameters and run metadata
+    config={
+        "learning_rate": args.lr,
+        "epochs": args.epochs_num,
+    })
+
 #### Training loop
 for epoch_num in range(start_epoch_num, args.epochs_num):
     logging.info(f"Start training epoch: {epoch_num:02d}")
@@ -176,6 +190,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         logging.debug(f"Epoch[{epoch_num:02d}]({loop_num}/{loops_num}): " +
                       f"current batch triplet loss = {batch_loss:.4f}, " +
                       f"average epoch triplet loss = {epoch_losses.mean():.4f}")
+        wandb.log({"loss": epoch_losses.mean()})
     
     logging.info(f"Finished epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
                  f"average epoch triplet loss = {epoch_losses.mean():.4f}")
@@ -183,6 +198,8 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
     # Compute recalls on validation set
     recalls, recalls_str = test.test(args, val_ds, model)
     logging.info(f"Recalls on val set {val_ds}: {recalls_str}")
+
+    wandb.log({"epoch_loss": epoch_losses.mean(), "R@1": recalls[0], "R@5": recalls[1], "R@10": recalls[2], "R@20": recalls[3]})
     
     is_best = recalls[1] > best_r5
     
