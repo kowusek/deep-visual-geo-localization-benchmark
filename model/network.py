@@ -13,6 +13,8 @@ from model.aggregation import Flatten
 from model.normalization import L2Norm
 import model.aggregation as aggregation
 
+from matplotlib.pyplot import imshow
+
 # Pretrained models on Google Landmarks v2 and Places 365
 PRETRAINED_MODELS = {
     'resnet18_places'  : '1DnEQXhmPxtBUrRc81nAvT8z17bk-GBj5',
@@ -25,6 +27,64 @@ PRETRAINED_MODELS = {
     'vgg16_gldv2'      : '10Ov9JdO7gbyz6mB5x0v_VSAUMj91Ta4o'
 }
 
+class GeoLocalizationNets(nn.Module):
+    """The used networks are composed of 2 backbones and an aggregation layer.
+    """
+    def __init__(self, args):
+        super().__init__()
+        self.query_backbone = get_backbone(args)
+        self.database_backbone = get_backbone(args)
+        self.arch_name = args.backbone
+        self.query_aggregation = get_aggregation(args)
+        self.database_aggregation = get_aggregation(args)
+
+        if args.aggregation in ["gem", "spoc", "mac", "rmac"]:
+            if args.l2 == "before_pool":
+                self.query_aggregation = nn.Sequential(L2Norm(), self.query_aggregation, Flatten())
+                self.database_aggregation = nn.Sequential(L2Norm(), self.database_aggregation, Flatten())
+            elif args.l2 == "after_pool":
+                self.query_aggregation = nn.Sequential(self.query_aggregation, L2Norm(), Flatten())
+                self.database_aggregation = nn.Sequential(self.database_aggregation, L2Norm(), Flatten())
+            elif args.l2 == "none":
+                self.query_aggregation = nn.Sequential(self.query_aggregation, Flatten())
+                self.database_aggregation = nn.Sequential(self.database_aggregation, Flatten())
+        
+        if args.fc_output_dim != None:
+            # Concatenate fully connected layer to the aggregation layer
+            self.query_aggregation = nn.Sequential(self.query_aggregation,
+                                             nn.Linear(args.features_dim, args.fc_output_dim),
+                                             L2Norm())
+            self.database_aggregation = nn.Sequential(self.database_aggregation,
+                                             nn.Linear(args.features_dim, args.fc_output_dim),
+                                             L2Norm())
+            args.features_dim = args.fc_output_dim
+
+    def forward(self, query=None, database=None):
+        if query != None and database != None:
+            # for image in query:
+            #     image_after = image.permute(1, 2, 0).cpu().numpy()
+            #     imshow(image_after)
+            # for image in database:
+            #     image_after = image.permute(1, 2, 0).cpu().numpy()
+            #     imshow(image_after)
+            query = self.query_backbone(query)
+            database = self.database_backbone(database)
+            query_features = self.query_aggregation(query)
+            database_features = self.database_aggregation(database)
+            x = (query_features, database_features)
+        elif database != None:
+            # for image in x:
+            #     image_after = image.permute(1, 2, 0).cpu().numpy()
+            #     imshow(image_after)
+            database = self.database_backbone(database)
+            x = self.database_aggregation(database)
+        elif query != None:
+            # for image in x:
+            #     image_after = image.permute(1, 2, 0).cpu().numpy()
+            #     imshow(image_after)
+            query = self.query_backbone(query)
+            x = self.query_aggregation(query)
+        return x
 
 class GeoLocalizationNet(nn.Module):
     """The used networks are composed of a backbone and an aggregation layer.

@@ -8,9 +8,9 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Benchmarking Visual Geolocalization",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # Training parameters
-    parser.add_argument("--train_batch_size", type=int, default=4,
+    parser.add_argument("--train_batch_size", type=int, default=1,
                         help="Number of triplets (query, pos, negs) in a batch. Each triplet consists of 12 images")
-    parser.add_argument("--infer_batch_size", type=int, default=16,
+    parser.add_argument("--infer_batch_size", type=int, default=1,
                         help="Batch size for inference (caching and testing)")
     parser.add_argument("--criterion", type=str, default='triplet', help='loss to be used',
                         choices=["triplet", "sare_ind", "sare_joint"])
@@ -58,7 +58,7 @@ def parse_arguments():
     # Other parameters
     parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"])
     parser.add_argument("--num_workers", type=int, default=8, help="num_workers for all dataloaders")
-    parser.add_argument('--resize', type=int, default=[480, 640], nargs=2, help="Resizing shape for images (HxW).")
+    parser.add_argument('--resize', type=int, default=[640, 640], nargs=2, help="Resizing shape for images (HxW).")
     parser.add_argument('--query_resize', type=int, default=[640, 1280], nargs=2, help="Resizing shape for images (HxW).")
     parser.add_argument('--test_method', type=str, default="hard_resize",
                         choices=["hard_resize", "single_query", "central_crop", "five_crops", "nearest_crop", "maj_voting"],

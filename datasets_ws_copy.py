@@ -42,12 +42,16 @@ def collate_fn(batch):
         triplets_local_indexes: torch tensor of shape (batch_size*10, 3).
         triplets_global_indexes: torch tensor of shape (batch_size, 12).
     """
-    images = torch.cat([e[0] for e in batch])
-    triplets_local_indexes = torch.cat([e[1][None] for e in batch])
-    triplets_global_indexes = torch.cat([e[2][None] for e in batch])
+
+    # image_after = query.permute(1, 2, 0).cpu().numpy()
+    # imshow(image_after)
+    query = torch.cat([e[0] for e in batch])
+    database = torch.cat([e[1] for e in batch])
+    triplets_local_indexes = torch.cat([e[2][None] for e in batch])
+    triplets_global_indexes = torch.cat([e[3][None] for e in batch])
     for i, (local_indexes, global_indexes) in enumerate(zip(triplets_local_indexes, triplets_global_indexes)):
-        local_indexes += len(global_indexes) * i  # Increment local indexes by offset (len(global_indexes) is 12)
-    return images, torch.cat(tuple(triplets_local_indexes)), triplets_global_indexes
+        local_indexes += len(local_indexes[0]) * i  # Increment local indexes by offset (len(global_indexes) is 12)
+    return query, database, torch.cat(tuple(triplets_local_indexes)), triplets_global_indexes
 
 
 class PCADataset(data.Dataset):
@@ -76,6 +80,7 @@ class BaseDataset(data.Dataset):
             raise FileNotFoundError(f"Folder {self.dataset_folder} does not exist")
         
         self.resize = args.resize
+        self.query_resize = args.query_resize
         self.test_method = args.test_method
         
         #### Read paths and UTM coordinates for all images.
@@ -94,12 +99,12 @@ class BaseDataset(data.Dataset):
         # Find soft_positives_per_query, which are within val_positive_dist_threshold (deafult 25 meters)
         knn = NearestNeighbors(n_jobs=-1)
         knn.fit(self.database_utms)
-        # self.soft_positives_per_query = knn.radius_neighbors(self.queries_utms,
-        #                                                      radius=args.val_positive_dist_threshold,
-        #                                                      return_distance=False)
-        self.soft_positives_per_query = list(knn.kneighbors(self.queries_utms,
-                                            4,
-                                            return_distance=False))
+        self.soft_positives_per_query = knn.radius_neighbors(self.queries_utms,
+                                                             radius=args.val_positive_dist_threshold,
+                                                             return_distance=False)
+        # self.soft_positives_per_query = list(knn.kneighbors(self.queries_utms,
+        #                                     4,
+        #                                     return_distance=False))
         
         self.images_paths = list(self.database_paths) + list(self.queries_paths)
         
@@ -175,18 +180,19 @@ class TripletsDataset(BaseDataset):
                 T.RandomPerspective(args.rand_perspective),
                 T.RandomResizedCrop(size=self.resize, scale=(1-args.random_resized_crop, 1), antialias=True),
                 T.RandomRotation(degrees=args.random_rotation),
-                self.resized_transform,
+                T.Resize(self.query_resize, antialias=True) if self.query_resize is not None else identity_transform,
+                base_transform
         ])
         
         # Find hard_positives_per_query, which are within train_positives_dist_threshold (10 meters)
         knn = NearestNeighbors(n_jobs=-1)
         knn.fit(self.database_utms)
-        # self.hard_positives_per_query = knn.radius_neighbors(self.queries_utms,
-        #                                      radius=args.train_positives_dist_threshold,  # 10 meters
-        #                                      return_distance=False)
-        self.hard_positives_per_query = list(knn.kneighbors(self.queries_utms,
-                                            1,
-                                            return_distance=False))
+        self.hard_positives_per_query = knn.radius_neighbors(self.queries_utms,
+                                             radius=args.train_positives_dist_threshold,  # 10 meters
+                                             return_distance=False)
+        # self.hard_positives_per_query = list(knn.kneighbors(self.queries_utms,
+        #                                     1,
+        #                                     return_distance=False))
         
         
         #### Some queries might have no positive, we should remove those queries.
@@ -255,23 +261,23 @@ class TripletsDataset(BaseDataset):
         #     image_original = path_to_pil_img(self.database_paths[image])
         #     imshow(image_original)
         ###
-        query = self.query_transform(path_to_pil_img(self.queries_paths[query_index]))
+        query = self.query_transform(path_to_pil_img(self.queries_paths[query_index])).unsqueeze(0)
         positive = self.resized_transform(path_to_pil_img(self.database_paths[best_positive_index]))
         negatives = [self.resized_transform(path_to_pil_img(self.database_paths[i])) for i in neg_indexes]
-        images = torch.stack((query, positive, *negatives), 0)
-        ###debug
-        # image_after = images[0].permute(1, 2, 0).numpy()
+        database = torch.stack((positive, *negatives), 0)
+        ##debug
+        # image_after = query.permute(1, 2, 0).numpy()
         # imshow(image_after)
-        # image_after = images[1].permute(1, 2, 0).numpy()
+        # image_after = database[1].permute(1, 2, 0).numpy()
         # imshow(image_after)
-        # image_after = images[2].permute(1, 2, 0).numpy()
+        # image_after = database[2].permute(1, 2, 0).numpy()
         # imshow(image_after)
-        ###
+        ##
 
-        triplets_local_indexes = torch.empty((0, 3), dtype=torch.int)
+        triplets_local_indexes = torch.empty((0, 2), dtype=torch.int)
         for neg_num in range(len(neg_indexes)):
-            triplets_local_indexes = torch.cat((triplets_local_indexes, torch.tensor([0, 1, 2 + neg_num]).reshape(1, 3)))
-        return images, triplets_local_indexes, self.triplets_global_indexes[index]
+            triplets_local_indexes = torch.cat((triplets_local_indexes, torch.tensor([0, 1 + neg_num]).reshape(1, 2)))
+        return query, database, triplets_local_indexes, self.triplets_global_indexes[index]
     
     def __len__(self):
         if self.is_inference:
@@ -289,8 +295,7 @@ class TripletsDataset(BaseDataset):
         elif self.mining == "random":
             self.compute_triplets_random(args, model)
     
-    @staticmethod
-    def compute_cache(args, model, subset_ds, cache_shape):
+    def compute_cache(self, args, model, subset_ds, cache_shape):
         """Compute the cache containing features of images, which is used to
         find best positive and hardest negatives."""
         subset_dl = DataLoader(dataset=subset_ds, num_workers=args.num_workers,
@@ -304,7 +309,10 @@ class TripletsDataset(BaseDataset):
         with torch.no_grad():
             for images, indexes in tqdm(subset_dl, ncols=100):
                 images = images.to(args.device)
-                features = model(images)
+                if indexes[0] < self.database_num:
+                    features = model(database=images)
+                else:
+                    features = model(query=images)
                 cache[indexes.numpy()] = features.cpu().numpy()
         return cache
     

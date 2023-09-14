@@ -12,10 +12,10 @@ import torchvision.transforms as transforms
 from torch.utils.data.dataloader import DataLoader
 
 import util
-import test
-import parser
+import test_copy
+import parser_copy
 import commons
-import datasets_ws
+import datasets_ws_copy
 
 from model import network
 from model.sync_batchnorm import convert_model
@@ -25,7 +25,7 @@ import wandb
 
 torch.backends.cudnn.benchmark = True  # Provides a speedup
 #### Initial setup: parser, logging...
-args = parser.parse_arguments()
+args = parser_copy.parse_arguments()
 start_time = datetime.now()
 args.save_dir = join("logs", args.save_dir, start_time.strftime('%Y-%m-%d_%H-%M-%S'))
 commons.setup_logging(args.save_dir)
@@ -39,17 +39,17 @@ logging.info(f"Using {torch.cuda.device_count()} GPUs and {multiprocessing.cpu_c
 #### Creation of Datasets
 logging.debug(f"Loading dataset {args.dataset_name} from folder {args.datasets_folder}")
 
-triplets_ds = datasets_ws.TripletsDataset(args, args.datasets_folder, args.dataset_name, "train", args.negs_num_per_query)
+triplets_ds = datasets_ws_copy.TripletsDataset(args, args.datasets_folder, args.dataset_name, "train", args.negs_num_per_query)
 logging.info(f"Train query set: {triplets_ds}")
 
-val_ds = datasets_ws.BaseDataset(args, args.datasets_folder, args.dataset_name, "val")
+val_ds = datasets_ws_copy.BaseDataset(args, args.datasets_folder, args.dataset_name, "val")
 logging.info(f"Val set: {val_ds}")
 
-test_ds = datasets_ws.BaseDataset(args, args.datasets_folder, args.dataset_name, "test")
+test_ds = datasets_ws_copy.BaseDataset(args, args.datasets_folder, args.dataset_name, "test")
 logging.info(f"Test set: {test_ds}")
 
 #### Initialize model
-model = network.GeoLocalizationNet(args)
+model = network.GeoLocalizationNets(args)
 model = model.to(args.device)
 if args.aggregation in ["netvlad", "crn"]:  # If using NetVLAD layer, initialize it
     if not args.resume:
@@ -126,7 +126,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         
         triplets_dl = DataLoader(dataset=triplets_ds, num_workers=args.num_workers,
                                  batch_size=args.train_batch_size,
-                                 collate_fn=datasets_ws.collate_fn,
+                                 collate_fn=datasets_ws_copy.collate_fn,
                                  pin_memory=(args.device == "cuda"),
                                  drop_last=True)
         
@@ -134,39 +134,41 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         
         # images shape: (train_batch_size*12)*3*H*W ; by default train_batch_size=4, H=480, W=640
         # triplets_local_indexes shape: (train_batch_size*10)*3 ; because 10 triplets per query
-        for images, triplets_local_indexes, _ in tqdm(triplets_dl, ncols=100):
+        for query, database, triplets_local_indexes, _ in tqdm(triplets_dl, ncols=100):
             
             # Flip all triplets or none
             if args.horizontal_flip:
-                images = transforms.RandomHorizontalFlip()(images)
+                query = transforms.RandomHorizontalFlip()(query)
+                database = transforms.RandomHorizontalFlip()(database)
             
             # Compute features of all images (images contains queries, positives and negatives)
-            features = model(images.to(args.device))
+            query_features, database_features = model(query=query.to(args.device), database=database.to(args.device))
             loss_triplet = 0
             
             if args.criterion == "triplet":
                 triplets_local_indexes = torch.transpose(
-                    triplets_local_indexes.view(args.train_batch_size, args.negs_num_per_query, 3), 1, 0)
+                    triplets_local_indexes.view(args.train_batch_size, args.negs_num_per_query, 2), 1, 0)
                 for triplets in triplets_local_indexes:
-                    queries_indexes, positives_indexes, negatives_indexes = triplets.T
-                    loss_triplet += criterion_triplet(features[queries_indexes],
-                                                      features[positives_indexes],
-                                                      features[negatives_indexes])
-            elif args.criterion == 'sare_joint':
-                # sare_joint needs to receive all the negatives at once
-                triplet_index_batch = triplets_local_indexes.view(args.train_batch_size, 10, 3)
-                for batch_triplet_index in triplet_index_batch:
-                    q = features[batch_triplet_index[0, 0]].unsqueeze(0)  # obtain query as tensor of shape 1xn_features
-                    p = features[batch_triplet_index[0, 1]].unsqueeze(0)  # obtain positive as tensor of shape 1xn_features
-                    n = features[batch_triplet_index[:, 2]]               # obtain negatives as tensor of shape 10xn_features
-                    loss_triplet += criterion_triplet(q, p, n)
-            elif args.criterion == "sare_ind":
-                for triplet in triplets_local_indexes:
-                    # triplet is a 1-D tensor with the 3 scalars indexes of the triplet
-                    q_i, p_i, n_i = triplet
-                    loss_triplet += criterion_triplet(features[q_i:q_i+1], features[p_i:p_i+1], features[n_i:n_i+1])
+                    positives_indexes, negatives_indexes = triplets.T
+                    loss_triplet += criterion_triplet(query_features,
+                                                      database_features[positives_indexes],
+                                                      database_features[negatives_indexes])
+            # elif args.criterion == 'sare_joint':
+            #     # sare_joint needs to receive all the negatives at once
+            #     triplet_index_batch = triplets_local_indexes.view(args.train_batch_size, 10, 3)
+            #     for batch_triplet_index in triplet_index_batch:
+            #         q = features[batch_triplet_index[0, 0]].unsqueeze(0)  # obtain query as tensor of shape 1xn_features
+            #         p = features[batch_triplet_index[0, 1]].unsqueeze(0)  # obtain positive as tensor of shape 1xn_features
+            #         n = features[batch_triplet_index[:, 2]]               # obtain negatives as tensor of shape 10xn_features
+            #         loss_triplet += criterion_triplet(q, p, n)
+            # elif args.criterion == "sare_ind":
+            #     for triplet in triplets_local_indexes:
+            #         # triplet is a 1-D tensor with the 3 scalars indexes of the triplet
+            #         q_i, p_i, n_i = triplet
+            #         loss_triplet += criterion_triplet(features[q_i:q_i+1], features[p_i:p_i+1], features[n_i:n_i+1])
             
-            del features
+            del query_features
+            del database_features
             loss_triplet /= (args.train_batch_size * args.negs_num_per_query)
             
             optimizer.zero_grad()
@@ -187,7 +189,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
                  f"average epoch triplet loss = {epoch_losses.mean():.4f}")
     
     # Compute recalls on validation set
-    recalls, recalls_str = test.test(args, val_ds, model)
+    recalls, recalls_str = test_copy.test(args, val_ds, model)
     logging.info(f"Recalls on val set {val_ds}: {recalls_str}")
 
     wandb.log({"epoch_loss": epoch_losses.mean(), "R@1": recalls[0], "R@5": recalls[1], "R@10": recalls[2], "R@20": recalls[3]})
@@ -221,5 +223,5 @@ logging.info(f"Trained for {epoch_num+1:02d} epochs, in total in {str(datetime.n
 best_model_state_dict = torch.load(join(args.save_dir, "best_model.pth"))["model_state_dict"]
 model.load_state_dict(best_model_state_dict)
 
-recalls, recalls_str = test.test(args, test_ds, model, test_method=args.test_method)
+recalls, recalls_str = test_copy.test(args, test_ds, model, test_method=args.test_method)
 logging.info(f"Recalls on {test_ds}: {recalls_str}")
