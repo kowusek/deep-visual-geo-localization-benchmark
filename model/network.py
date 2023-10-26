@@ -187,7 +187,7 @@ def get_backbone(args):
         # elif args.backbone.endswith("conv5"):
         #     logging.debug(f"Train only conv4_x and conv5_x of the resnet{args.backbone.split('conv')[0]}, freeze the previous ones")
         #     layers = list(backbone.children())[:-2]
-        layers = list(backbone.children())[:-1]
+        layers = list(backbone.children())[:-2]
     elif args.backbone == "vgg16":
         if args.pretrain in ['places', 'gldv2']:
             backbone = get_pretrained_model(args)

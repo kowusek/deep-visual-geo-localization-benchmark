@@ -50,8 +50,8 @@ def rmac(x, L=3, eps=1e-6):
     b = (max(H, W)-w)/(steps-1)
     (tmp, idx) = torch.min(torch.abs(((w**2 - w*b)/w**2)-ovr), 0) # steps(idx) regions for long dimension
     # region overplus per dimension
-    Wd = 0;
-    Hd = 0;
+    Wd = 0
+    Hd = 0
     if H < W:  
         Wd = idx.item() + 1
     elif H > W:

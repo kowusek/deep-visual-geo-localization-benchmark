@@ -309,6 +309,10 @@ class TripletsDataset(BaseDataset):
         with torch.no_grad():
             for images, indexes in tqdm(subset_dl, ncols=100):
                 images = images.to(args.device)
+                # if indexes[0] >= self.database_num - 1:
+                #     for image in images:
+                #         image_after = image.permute(1, 2, 0).cpu().numpy()
+                #         imshow(image_after)
                 if indexes[0] < self.database_num:
                     features = model(database=images)
                 else:

@@ -23,6 +23,8 @@ from model.functional import sare_ind, sare_joint
 
 import wandb
 
+from matplotlib.pyplot import imshow
+
 torch.backends.cudnn.benchmark = True  # Provides a speedup
 #### Initial setup: parser, logging...
 args = parser_copy.parse_arguments()
@@ -136,6 +138,13 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         # triplets_local_indexes shape: (train_batch_size*10)*3 ; because 10 triplets per query
         for query, database, triplets_local_indexes, _ in tqdm(triplets_dl, ncols=100):
             
+            # for image in query:
+            #     image_after = image.permute(1, 2, 0).cpu().numpy()
+            #     imshow(image_after)
+            # for image in database:
+            #     image_after = image.permute(1, 2, 0).cpu().numpy()
+            #     imshow(image_after)
+
             # Flip all triplets or none
             if args.horizontal_flip:
                 query = transforms.RandomHorizontalFlip()(query)
@@ -148,9 +157,9 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             if args.criterion == "triplet":
                 triplets_local_indexes = torch.transpose(
                     triplets_local_indexes.view(args.train_batch_size, args.negs_num_per_query, 2), 1, 0)
-                for triplets in triplets_local_indexes:
-                    positives_indexes, negatives_indexes = triplets.T
-                    loss_triplet += criterion_triplet(query_features,
+                for i, triplet in enumerate(triplets_local_indexes[0]):
+                    positives_indexes, negatives_indexes = triplet
+                    loss_triplet += criterion_triplet(query_features[i],
                                                       database_features[positives_indexes],
                                                       database_features[negatives_indexes])
             # elif args.criterion == 'sare_joint':
